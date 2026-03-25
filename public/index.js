@@ -1,67 +1,224 @@
 const socket = io('/');
 const peer = new Peer();
+
 let myVideoStream;
 let myId;
-var videoGrid = document.getElementById('videoDiv')
-var myvideo = document.createElement('video');
-myvideo.muted = true;
-const peerConnections = {}
-navigator.mediaDevices.getUserMedia({
-  video:true,
-  audio:true
-}).then((stream)=>{
-  myVideoStream = stream;
-  addVideo(myvideo , stream);
-  peer.on('call' , call=>{
-    call.answer(stream);
-      const vid = document.createElement('video');
-    call.on('stream' , userStream=>{
-      addVideo(vid , userStream);
-    })
-    call.on('error' , (err)=>{
-      alert(err)
-    })
-    call.on("close", () => {
-        console.log(vid);
-        vid.remove();
-    })
-    peerConnections[call.peer] = call;
-  })
-}).catch(err=>{
-    alert(err.message)
-})
-peer.on('open' , (id)=>{
-  myId = id;
-  socket.emit("newUser" , id , roomID);
-})
-peer.on('error' , (err)=>{
-  alert(err.type);
+let myUsername = 'Guest';
+let micOn = true;
+let camOn = true;
+let participantCount = 0;
+
+const peerConnections = {};
+const videoGrid = document.getElementById('videoGrid');
+const chatMessages = document.getElementById('chatMessages');
+const chatInput = document.getElementById('chatInput');
+const participantEl = document.getElementById('participant-count');
+
+// ── USERNAME MODAL ──
+document.getElementById('joinBtn').addEventListener('click', startSession);
+document.getElementById('usernameInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') startSession();
 });
-socket.on('userJoined' , id=>{
-  console.log("new user joined")
-  const call  = peer.call(id , myVideoStream);
+
+function startSession() {
+  const val = document.getElementById('usernameInput').value.trim();
+  myUsername = val || 'Guest_' + Math.floor(Math.random() * 1000);
+  document.getElementById('usernameModal').style.display = 'none';
+  initMedia();
+}
+
+// ── MEDIA INIT ──
+function initMedia() {
+  navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    .then((stream) => {
+      myVideoStream = stream;
+      addVideo(stream, myUsername + ' (You)', true);
+
+      peer.on('call', (call) => {
+        call.answer(stream);
+        const vid = document.createElement('video');
+        call.on('stream', (userStream) => {
+          addVideo(userStream, 'Peer', false, vid, call.peer);
+        });
+        call.on('close', () => removeVideo(call.peer));
+        call.on('error', (err) => console.error(err));
+        peerConnections[call.peer] = call;
+      });
+    })
+    .catch((err) => showToast('⚠ ' + err.message));
+}
+
+// ── PEER OPEN ──
+peer.on('open', (id) => {
+  myId = id;
+  socket.emit('newUser', id, roomID, myUsername);
+  addParticipant();
+});
+
+peer.on('error', (err) => showToast('Peer error: ' + err.type));
+
+// ── SOCKET EVENTS ──
+socket.on('userJoined', (id, username) => {
+  showToast(`${username || 'Someone'} joined`);
+  addParticipant();
+  if (!myVideoStream) return;
+  const call = peer.call(id, myVideoStream);
+  if (!call) return;
   const vid = document.createElement('video');
-  call.on('error' , (err)=>{
-    alert(err);
-  })
-  call.on('stream' , userStream=>{
-    addVideo(vid , userStream);
-  })
-  call.on('close' , ()=>{
-    vid.remove();
-    console.log("user disconect")
-  })
+  call.on('stream', (userStream) => addVideo(userStream, username || 'Peer', false, vid, id));
+  call.on('close', () => removeVideo(id));
+  call.on('error', (err) => console.error(err));
   peerConnections[id] = call;
-})
-socket.on('userDisconnect' , id=>{
-  if(peerConnections[id]){
+});
+
+socket.on('userDisconnect', (id, username) => {
+  showToast(`${username || 'Someone'} left`);
+  removeParticipant();
+  if (peerConnections[id]) {
     peerConnections[id].close();
+    delete peerConnections[id];
   }
-})
-function addVideo(video , stream){
+  removeVideo(id);
+});
+
+socket.on('chatMessage', (msg, username) => {
+  appendMessage(msg, username, username === myUsername);
+});
+
+// ── VIDEO HELPERS ──
+function addVideo(stream, label, muted, existingVid, peerId) {
+  const wrapper = document.createElement('div');
+  wrapper.classList.add('video-wrapper');
+  if (peerId) wrapper.dataset.peerId = peerId;
+
+  const video = existingVid || document.createElement('video');
   video.srcObject = stream;
-  video.addEventListener('loadedmetadata', () => {
-    video.play()
-  })
-  videoGrid.append(video);
+  video.muted = muted || false;
+  video.autoplay = true;
+  video.playsInline = true;
+
+  const labelEl = document.createElement('div');
+  labelEl.classList.add('video-label');
+  labelEl.textContent = label;
+
+  wrapper.appendChild(video);
+  wrapper.appendChild(labelEl);
+  videoGrid.appendChild(wrapper);
+}
+
+function removeVideo(peerId) {
+  const el = videoGrid.querySelector(`[data-peer-id="${peerId}"]`);
+  if (el) {
+    el.style.animation = 'none';
+    el.style.transition = 'opacity 0.3s, transform 0.3s';
+    el.style.opacity = '0';
+    el.style.transform = 'scale(0.9)';
+    setTimeout(() => el.remove(), 300);
+  }
+  removeParticipant();
+}
+
+// ── PARTICIPANT COUNT ──
+function addParticipant() {
+  participantCount++;
+  updateCount();
+}
+function removeParticipant() {
+  if (participantCount > 1) participantCount--;
+  updateCount();
+}
+function updateCount() {
+  participantEl.textContent = participantCount + (participantCount === 1 ? ' ONLINE' : ' ONLINE');
+}
+
+// ── CONTROLS ──
+document.getElementById('micBtn').addEventListener('click', () => {
+  if (!myVideoStream) return;
+  micOn = !micOn;
+  myVideoStream.getAudioTracks().forEach(t => t.enabled = micOn);
+  const btn = document.getElementById('micBtn');
+  btn.classList.toggle('off', !micOn);
+  btn.title = micOn ? 'Mute Mic' : 'Unmute Mic';
+  btn.querySelector('svg').innerHTML = micOn
+    ? `<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+       <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+       <line x1="12" y1="19" x2="12" y2="23"/>
+       <line x1="8" y1="23" x2="16" y2="23"/>`
+    : `<line x1="1" y1="1" x2="23" y2="23"/>
+       <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/>
+       <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/>
+       <line x1="12" y1="19" x2="12" y2="23"/>
+       <line x1="8" y1="23" x2="16" y2="23"/>`;
+  showToast(micOn ? 'Mic ON' : 'Mic OFF');
+});
+
+document.getElementById('camBtn').addEventListener('click', () => {
+  if (!myVideoStream) return;
+  camOn = !camOn;
+  myVideoStream.getVideoTracks().forEach(t => t.enabled = camOn);
+  const btn = document.getElementById('camBtn');
+  btn.classList.toggle('off', !camOn);
+  btn.title = camOn ? 'Turn Off Camera' : 'Turn On Camera';
+  btn.querySelector('svg').innerHTML = camOn
+    ? `<polygon points="23 7 16 12 23 17 23 7"/>
+       <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>`
+    : `<line x1="1" y1="1" x2="23" y2="23"/>
+       <path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/>
+       <line x1="16" y1="11" x2="16" y2="11"/>`;
+  showToast(camOn ? 'Camera ON' : 'Camera OFF');
+});
+
+document.getElementById('endBtn').addEventListener('click', () => {
+  window.location.href = '/';
+});
+
+// ── CHAT ──
+document.getElementById('sendBtn').addEventListener('click', sendMessage);
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+function sendMessage() {
+  const msg = chatInput.value.trim();
+  if (!msg) return;
+  socket.emit('chatMessage', msg, myUsername, roomID);
+  chatInput.value = '';
+}
+
+function appendMessage(msg, username, isMe) {
+  const div = document.createElement('div');
+  div.classList.add('chat-msg');
+  if (isMe) div.classList.add('mine');
+
+  const sender = document.createElement('div');
+  sender.classList.add('sender');
+  sender.textContent = username;
+
+  const bubble = document.createElement('div');
+  bubble.classList.add('bubble');
+  bubble.textContent = msg;
+
+  div.appendChild(sender);
+  div.appendChild(bubble);
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function addSystemMessage(text) {
+  const div = document.createElement('div');
+  div.classList.add('chat-system');
+  div.textContent = text;
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// ── TOAST ──
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2500);
 }
