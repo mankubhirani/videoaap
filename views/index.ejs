@@ -1,61 +1,586 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
-  <head>
-    <meta charset="utf-8" />
-    <title>Video App</title>
-    <style media="screen">
-      *{
-        margin: 0;
-      }
-      #videoDiv{
-        display: grid;
-        grid-gap: 10px;
-        height:80%;
-        position: relative;
-        grid-template-columns: repeat(auto-fill, 300px);
-        grid-auto-rows: 300px;
-      }
-      #footer{
-        width: 100%;
-        height: 50px;
-        background-color: white;
-        display: flex;
-        justify-content:center;
-        flex:1;
-        border-bottom: 1px solid grey;
-        margin-top: 10px;
-      }
-      button{
-        height: 30px;
-        width: 80px;
-        margin-top: 10px;
-        text-align: center;
-        border-radius: 10px;
-        outline: none;
-        border:none;
-        text-decoration: none;
-        background-color:red;
-        cursor: pointer;
-      }
-      video {
-        width: 100%;
-        height: 100%;
-        object-fit:cover;
-        border:8px solid rgb(63, 56, 192);
-        border-radius: 8px;
-        margin-left: 50px;
-      }
-    </style>
-    <script type="text/javascript">
-      var roomID = "<%= RoomId %>"
-    </script>
-    <script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js" defer></script>
-    <script src="socket.io/socket.io.js" defer></script>
-    <script src="index.js" charset="utf-8" defer></script>
-  </head>
-  <body>
-    <div id="videoDiv">
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>NexCall — Room <%= RoomId %></title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --neon-cyan: #00f5ff;
+      --neon-purple: #bf00ff;
+      --neon-green: #00ff88;
+      --neon-red: #ff003c;
+      --glass-bg: rgba(10, 10, 30, 0.75);
+      --glass-border: rgba(0, 245, 255, 0.15);
+      --surface: rgba(15, 15, 40, 0.9);
+      --text-primary: #e0f7ff;
+      --text-muted: rgba(180, 210, 230, 0.6);
+      --danger: #ff003c;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #050510;
+      font-family: 'Rajdhani', sans-serif;
+      color: var(--text-primary);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Animated background grid */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0,245,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,245,255,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse at 20% 50%, rgba(191,0,255,0.08) 0%, transparent 60%),
+                  radial-gradient(ellipse at 80% 20%, rgba(0,245,255,0.06) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── HEADER ── */
+    #header {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 24px;
+      background: rgba(5, 5, 20, 0.95);
+      border-bottom: 1px solid var(--glass-border);
+      box-shadow: 0 0 30px rgba(0,245,255,0.05);
+      flex-shrink: 0;
+    }
+
+    #header .logo {
+      font-family: 'Orbitron', monospace;
+      font-weight: 900;
+      font-size: 1.3rem;
+      letter-spacing: 3px;
+      background: linear-gradient(90deg, var(--neon-cyan), var(--neon-purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: none;
+    }
+
+    #header .room-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      letter-spacing: 1px;
+    }
+
+    #header .room-badge {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-family: 'Orbitron', monospace;
+      font-size: 0.65rem;
+      color: var(--neon-cyan);
+      letter-spacing: 2px;
+    }
+
+    #participant-count {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      color: var(--neon-green);
+      font-family: 'Orbitron', monospace;
+    }
+
+    #participant-count::before {
+      content: '';
+      width: 7px; height: 7px;
+      background: var(--neon-green);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--neon-green);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    /* ── MAIN LAYOUT ── */
+    #main {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      gap: 0;
+    }
+
+    /* ── VIDEO SECTION ── */
+    #videoSection {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 16px;
+      gap: 12px;
+    }
+
+    #videoGrid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      grid-auto-rows: minmax(200px, 1fr);
+      gap: 12px;
+      overflow-y: auto;
+      align-content: start;
+    }
+
+    #videoGrid::-webkit-scrollbar { width: 4px; }
+    #videoGrid::-webkit-scrollbar-track { background: transparent; }
+    #videoGrid::-webkit-scrollbar-thumb { background: var(--neon-cyan); border-radius: 4px; }
+
+    .video-wrapper {
+      position: relative;
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--glass-border);
+      box-shadow: 0 0 20px rgba(0,245,255,0.08), inset 0 0 30px rgba(0,0,0,0.3);
+      transition: border-color 0.3s, box-shadow 0.3s;
+      animation: videoIn 0.4s ease forwards;
+    }
+
+    @keyframes videoIn {
+      from { opacity: 0; transform: scale(0.92); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .video-wrapper:hover {
+      border-color: rgba(0,245,255,0.4);
+      box-shadow: 0 0 30px rgba(0,245,255,0.15);
+    }
+
+    .video-wrapper.speaking {
+      border-color: var(--neon-green);
+      box-shadow: 0 0 25px rgba(0,255,136,0.3);
+    }
+
+    .video-wrapper video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .video-label {
+      position: absolute;
+      bottom: 8px;
+      left: 10px;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(0,245,255,0.2);
+      border-radius: 6px;
+      padding: 3px 10px;
+      font-size: 0.7rem;
+      letter-spacing: 1px;
+      color: var(--neon-cyan);
+      font-family: 'Orbitron', monospace;
+    }
+
+    /* ── CONTROLS ── */
+    #controls {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 0 4px;
+      flex-shrink: 0;
+    }
+
+    .ctrl-btn {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      border: 1px solid var(--glass-border);
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .ctrl-btn::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0,245,255,0.1) 0%, transparent 70%);
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .ctrl-btn:hover::before { opacity: 1; }
+    .ctrl-btn:hover { border-color: var(--neon-cyan); box-shadow: 0 0 15px rgba(0,245,255,0.2); transform: translateY(-2px); }
+
+    .ctrl-btn svg { width: 22px; height: 22px; stroke: var(--neon-cyan); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+    .ctrl-btn.off { border-color: rgba(255,0,60,0.4); background: rgba(255,0,60,0.1); }
+    .ctrl-btn.off svg { stroke: var(--neon-red); }
+    .ctrl-btn.off:hover { border-color: var(--neon-red); box-shadow: 0 0 15px rgba(255,0,60,0.3); }
+
+    .ctrl-btn.end-call {
+      width: 58px; height: 58px;
+      background: linear-gradient(135deg, #ff003c, #bf0030);
+      border-color: transparent;
+      box-shadow: 0 0 20px rgba(255,0,60,0.4);
+    }
+    .ctrl-btn.end-call svg { stroke: white; }
+    .ctrl-btn.end-call:hover { transform: translateY(-2px) scale(1.05); box-shadow: 0 0 30px rgba(255,0,60,0.6); }
+
+    /* ── CHAT SIDEBAR ── */
+    #chatSidebar {
+      width: 300px;
+      flex-shrink: 0;
+      background: rgba(8, 8, 25, 0.92);
+      border-left: 1px solid var(--glass-border);
+      display: flex;
+      flex-direction: column;
+      backdrop-filter: blur(20px);
+      position: relative;
+      z-index: 5;
+    }
+
+    #chatHeader {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--glass-border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    #chatHeader span {
+      font-family: 'Orbitron', monospace;
+      font-size: 0.7rem;
+      letter-spacing: 2px;
+      color: var(--neon-cyan);
+      text-transform: uppercase;
+    }
+
+    #chatHeader .chat-icon {
+      width: 18px; height: 18px;
+      stroke: var(--neon-cyan); fill: none; stroke-width: 2;
+    }
+
+    #chatMessages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    #chatMessages::-webkit-scrollbar { width: 3px; }
+    #chatMessages::-webkit-scrollbar-track { background: transparent; }
+    #chatMessages::-webkit-scrollbar-thumb { background: rgba(0,245,255,0.3); border-radius: 3px; }
+
+    .chat-msg {
+      animation: msgIn 0.3s ease forwards;
+      opacity: 0;
+    }
+
+    @keyframes msgIn {
+      from { opacity: 0; transform: translateX(10px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    .chat-msg.mine { align-self: flex-end; }
+
+    .chat-msg .sender {
+      font-size: 0.65rem;
+      letter-spacing: 1px;
+      color: var(--neon-purple);
+      font-family: 'Orbitron', monospace;
+      margin-bottom: 3px;
+    }
+
+    .chat-msg.mine .sender { color: var(--neon-cyan); text-align: right; }
+
+    .chat-msg .bubble {
+      background: rgba(191,0,255,0.1);
+      border: 1px solid rgba(191,0,255,0.2);
+      border-radius: 10px 10px 10px 2px;
+      padding: 8px 12px;
+      font-size: 0.85rem;
+      line-height: 1.4;
+      max-width: 220px;
+      word-break: break-word;
+      color: var(--text-primary);
+    }
+
+    .chat-msg.mine .bubble {
+      background: rgba(0,245,255,0.08);
+      border-color: rgba(0,245,255,0.2);
+      border-radius: 10px 10px 2px 10px;
+    }
+
+    .chat-system {
+      text-align: center;
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      letter-spacing: 1px;
+      padding: 4px 0;
+      opacity: 0.7;
+    }
+
+    #chatInputArea {
+      padding: 12px;
+      border-top: 1px solid var(--glass-border);
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    #chatInput {
+      flex: 1;
+      background: rgba(0,0,0,0.4);
+      border: 1px solid var(--glass-border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: var(--text-primary);
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      resize: none;
+    }
+
+    #chatInput:focus {
+      border-color: var(--neon-cyan);
+      box-shadow: 0 0 10px rgba(0,245,255,0.1);
+    }
+
+    #chatInput::placeholder { color: rgba(180,210,230,0.3); }
+
+    #sendBtn {
+      width: 38px; height: 38px;
+      flex-shrink: 0;
+      background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(191,0,255,0.2));
+      border: 1px solid rgba(0,245,255,0.3);
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s;
+    }
+
+    #sendBtn:hover { background: rgba(0,245,255,0.2); box-shadow: 0 0 12px rgba(0,245,255,0.2); transform: translateY(-1px); }
+    #sendBtn svg { width: 16px; height: 16px; stroke: var(--neon-cyan); fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+
+    /* Username modal */
+    #usernameModal {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #usernameBox {
+      background: rgba(8,8,30,0.95);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      padding: 40px;
+      min-width: 320px;
+      text-align: center;
+      box-shadow: 0 0 60px rgba(0,245,255,0.1), 0 0 120px rgba(191,0,255,0.08);
+      animation: boxIn 0.4s cubic-bezier(.175,.885,.32,1.275) forwards;
+    }
+
+    @keyframes boxIn {
+      from { opacity:0; transform: scale(0.85) translateY(20px); }
+      to { opacity:1; transform: scale(1) translateY(0); }
+    }
+
+    #usernameBox h2 {
+      font-family: 'Orbitron', monospace;
+      font-size: 1rem;
+      letter-spacing: 3px;
+      color: var(--neon-cyan);
+      margin-bottom: 6px;
+    }
+
+    #usernameBox p {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 24px;
+      letter-spacing: 1px;
+    }
+
+    #usernameInput {
+      width: 100%;
+      background: rgba(0,0,0,0.5);
+      border: 1px solid var(--glass-border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: white;
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 1rem;
+      letter-spacing: 1px;
+      outline: none;
+      margin-bottom: 16px;
+      transition: border-color 0.2s;
+      text-align: center;
+    }
+
+    #usernameInput:focus { border-color: var(--neon-cyan); box-shadow: 0 0 12px rgba(0,245,255,0.15); }
+
+    #joinBtn {
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(90deg, rgba(0,245,255,0.2), rgba(191,0,255,0.2));
+      border: 1px solid rgba(0,245,255,0.4);
+      border-radius: 8px;
+      color: var(--neon-cyan);
+      font-family: 'Orbitron', monospace;
+      font-size: 0.75rem;
+      letter-spacing: 3px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    #joinBtn:hover { background: rgba(0,245,255,0.15); box-shadow: 0 0 20px rgba(0,245,255,0.2); }
+
+    /* Notification toast */
+    #toast {
+      position: fixed;
+      bottom: 90px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(8,8,30,0.95);
+      border: 1px solid var(--glass-border);
+      border-radius: 30px;
+      padding: 8px 20px;
+      font-size: 0.75rem;
+      letter-spacing: 1px;
+      color: var(--neon-green);
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.3s;
+      font-family: 'Orbitron', monospace;
+    }
+
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  </style>
+  <script>var roomID = "<%= RoomId %>"</script>
+  <script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js" defer></script>
+  <script src="socket.io/socket.io.js" defer></script>
+  <script src="index.js" charset="utf-8" defer></script>
+</head>
+<body>
+
+<!-- Username Modal -->
+<div id="usernameModal">
+  <div id="usernameBox">
+    <h2>NEXCALL</h2>
+    <p>ENTER YOUR CALLSIGN</p>
+    <input type="text" id="usernameInput" placeholder="Your name..." maxlength="20" autocomplete="off"/>
+    <button id="joinBtn">ENTER ROOM</button>
+  </div>
+</div>
+
+<!-- Header -->
+<div id="header">
+  <div class="logo">NEX<span style="color:var(--neon-purple)">CALL</span></div>
+  <div class="room-info">
+    <div class="room-badge">ROOM: <%= RoomId.substring(0,8).toUpperCase() %></div>
+    <div id="participant-count">1 ONLINE</div>
+  </div>
+</div>
+
+<!-- Main -->
+<div id="main">
+
+  <!-- Video Section -->
+  <div id="videoSection">
+    <div id="videoGrid"></div>
+    <div id="controls">
+
+      <!-- Mic -->
+      <button class="ctrl-btn" id="micBtn" title="Toggle Mic">
+        <svg id="micIcon" viewBox="0 0 24 24">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
+
+      <!-- Camera -->
+      <button class="ctrl-btn" id="camBtn" title="Toggle Camera">
+        <svg id="camIcon" viewBox="0 0 24 24">
+          <polygon points="23 7 16 12 23 17 23 7"/>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+        </svg>
+      </button>
+
+      <!-- End Call -->
+      <button class="ctrl-btn end-call" id="endBtn" title="End Call">
+        <svg viewBox="0 0 24 24">
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.4 2 2 0 0 1 3.6 1.22h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.77a16 16 0 0 0 6.29 6.29l1.62-1.62a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+        </svg>
+      </button>
 
     </div>
-  </body>
+  </div>
+
+  <!-- Chat Sidebar -->
+  <div id="chatSidebar">
+    <div id="chatHeader">
+      <svg class="chat-icon" viewBox="0 0 24 24">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+      <span>Live Chat</span>
+    </div>
+    <div id="chatMessages"></div>
+    <div id="chatInputArea">
+      <textarea id="chatInput" rows="1" placeholder="Message..."></textarea>
+      <button id="sendBtn">
+        <svg viewBox="0 0 24 24">
+          <line x1="22" y1="2" x2="11" y2="13"/>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+</body>
 </html>
